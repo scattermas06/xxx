@@ -1,0 +1,304 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>X</title>
+<script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://cdn.jsdelivr.net/pyodide/v0.26.2/full/pyodide.js"></script>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+:root{--bg:#0a0a0a;--card:#111;--border:#222;--text:#f5f5f5}
+body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;background:var(--bg);color:var(--text);height:100vh;display:flex;flex-direction:column}
+.header{padding:12px 18px;border-bottom:1px solid var(--border);background:var(--card);display:flex;align-items:center;gap:12px}
+.logo{width:30px;height:30px;background:#fff;color:#000;border-radius:7px;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:18px}
+.tabs{margin-left:auto;display:flex;gap:4px}
+.tabs button{background:transparent;border:none;color:#888;padding:8px 14px;border-radius:8px;cursor:pointer}
+.tabs button.active{background:#1a1a1a;color:#fff}
+.panel{flex:1;display:none;flex-direction:column;overflow:hidden}
+.panel.active{display:flex}
+.chat{flex:1;overflow-y:auto;padding:18px;display:flex;flex-direction:column;gap:14px}
+.message{max-width:78%;padding:13px 16px;border-radius:16px;line-height:1.55;animation:slide .15s ease}
+@keyframes slide{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
+.user{align-self:flex-end;background:#1c1c1c}
+.assistant{align-self:flex-start;background:var(--card);border:1px solid var(--border)}
+.sources{display:flex;flex-wrap:wrap;gap:6px;margin-top:10px}
+.source{display:flex;align-items:center;gap:6px;background:#1a1a1a;padding:4px 10px;border-radius:20px;font-size:12px;text-decoration:none;color:#ccc;border:1px solid #333}
+.source img{width:14px;height:14px;border-radius:2px}
+.typing-indicator{display:flex;align-items:center;gap:10px;padding:12px 16px;background:#111;border:1px solid #222;border-radius:18px;width:fit-content}
+.dots{display:flex;gap:5px}
+.dots span{width:7px;height:7px;background:#666;border-radius:50%;animation:bounce 1.4s infinite ease-in-out}
+.dots span:nth-child(2){animation-delay:.2s}
+.dots span:nth-child(3){animation-delay:.4s}
+@keyframes bounce{0%,60%,100%{transform:translateY(0);opacity:.4}30%{transform:translateY(-6px);opacity:1}}
+.typing-text{font-size:14px;color:#888}
+.input-area{padding:12px 16px;border-top:1px solid var(--border);background:var(--card);display:flex;gap:8px;align-items:flex-end}
+textarea{flex:1;background:#1a1a1a;border:1px solid #2a2a2a;color:#fff;padding:12px;border-radius:12px;resize:none;max-height:100px;outline:none;font-size:15px}
+button.primary{background:#fff;color:#000;border:none;height:42px;padding:0 18px;border-radius:12px;font-weight:600;cursor:pointer}
+.icon-btn{background:#222;border:none;color:#fff;width:42px;height:42px;border-radius:12px;cursor:pointer;font-size:18px}
+#map{height:100%;width:100%}
+.map-overlay{position:absolute;top:12px;left:12px;background:rgba(0,0,0,.75);padding:8px 12px;border-radius:8px;font-size:13px;z-index:1000}
+.terminal{flex:1;background:#0c0c0c;padding:14px;font-family:ui-monospace,monospace;font-size:13.5px;overflow-y:auto;white-space:pre-wrap}
+.config{padding:8px 16px;background:#0e0e0e;font-size:13px;display:flex;gap:8px;align-items:center}
+.config input,.config select{background:#1a1a1a;border:1px solid #333;color:#fff;padding:6px 10px;border-radius:6px}
+</style>
+</head>
+<body>
+
+<div class="header">
+  <div class="logo">X</div>
+  <strong>X</strong>
+  <div class="tabs">
+    <button class="active" onclick="switchTab('chat',this)">Chat</button>
+    <button onclick="switchTab('map',this)">Peta</button>
+    <button onclick="switchTab('terminal',this)">Terminal</button>
+  </div>
+</div>
+
+<div class="config">
+  <select id="model">
+    <option value="groq">Groq</option>
+    <option value="gemini">Gemini</option>
+  </select>
+  <input type="password" id="apiKey" placeholder="API Key" style="width:200px">
+  <button class="icon-btn" onclick="getGPS()" title="GPS" style="width:auto;padding:0 12px">📍</button>
+  <label style="margin-left:auto;display:flex;align-items:center;gap:6px;color:#888">
+    <input type="checkbox" id="soundToggle" checked> Suara
+  </label>
+</div>
+
+<div id="chatPanel" class="panel active">
+  <div class="chat" id="chat"></div>
+  <div class="input-area">
+    <button class="icon-btn" id="voiceBtn">🎤</button>
+    <button class="icon-btn" onclick="document.getElementById('file').click()">📎</button>
+    <input type="file" id="file" hidden>
+    <textarea id="input" rows="1" placeholder="Pesan..."></textarea>
+    <button class="primary" id="send">Kirim</button>
+  </div>
+</div>
+
+<div id="mapPanel" class="panel">
+  <div id="map"></div>
+  <div class="map-overlay" id="mapStatus">Tekan 📍 untuk zoom visual</div>
+</div>
+
+<div id="terminalPanel" class="panel">
+  <div class="terminal" id="termOutput">X Terminal • Python (Pyodide)\nKetik kode lalu Enter\n\n</div>
+  <div style="display:flex;padding:10px;background:#111;border-top:1px solid #222">
+    <span style="color:#4ade80;margin-right:8px">>>></span>
+    <input id="termInput" style="flex:1;background:transparent;border:none;color:#fff;outline:none;font-family:inherit" placeholder="print('Hello X')">
+  </div>
+</div>
+
+<script>
+const chat=document.getElementById("chat");
+const input=document.getElementById("input");
+const sendBtn=document.getElementById("send");
+const soundToggle=document.getElementById("soundToggle");
+const apiKeyInput=document.getElementById("apiKey");
+const modelSelect=document.getElementById("model");
+let map,pyodide,recognition,currentAbort;
+
+const audioCtx=new(window.AudioContext||window.webkitAudioContext)();
+function playType(){
+  if(!soundToggle.checked)return;
+  const o=audioCtx.createOscillator(),g=audioCtx.createGain();
+  o.connect(g);g.connect(audioCtx.destination);
+  o.frequency.value=700+Math.random()*300;
+  g.gain.value=0.025;
+  o.start();
+  g.gain.exponentialRampToValueAtTime(0.001,audioCtx.currentTime+0.04);
+  o.stop(audioCtx.currentTime+0.04);
+}
+
+function switchTab(name,btn){
+  document.querySelectorAll(".panel").forEach(p=>p.classList.remove("active"));
+  document.querySelectorAll(".tabs button").forEach(b=>b.classList.remove("active"));
+  document.getElementById(name+"Panel").classList.add("active");
+  btn.classList.add("active");
+  if(name==="map"&&!map)initMap();
+  if(name==="terminal"&&!pyodide)initPy();
+}
+
+function initMap(){
+  map=L.map("map").setView([-2.5,118],5);
+  L.tileLayer("https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png",{attribution:"© OSM © CARTO"}).addTo(map);
+}
+
+async function zoomTo(lat,lon){
+  if(!map){switchTab("map",document.querySelectorAll(".tabs button")[1]);await new Promise(r=>setTimeout(r,400));}
+  const status=document.getElementById("mapStatus");
+  const steps=[{n:"Indonesia",la:-2.5,lo:118,z:5},{n:"Jawa Tengah",la:-7.15,lo:110.14,z:8},{n:"Lokasi",la:lat,lo:lon,z:15}];
+  for(const s of steps){
+    status.textContent="Menuju "+s.n+"...";
+    map.flyTo([s.la,s.lo],s.z,{duration:1.6});
+    await new Promise(r=>setTimeout(r,1800));
+  }
+  L.marker([lat,lon]).addTo(map).bindPopup("Lokasimu").openPopup();
+  status.textContent="Sampai";
+}
+
+function getGPS(){
+  navigator.geolocation?.getCurrentPosition(p=>zoomTo(p.coords.latitude,p.coords.longitude));
+}
+
+async function initPy(){
+  document.getElementById("termOutput").textContent+="Loading Python...\n";
+  pyodide=await loadPyodide();
+  document.getElementById("termOutput").textContent+="Siap.\n\n";
+}
+document.getElementById("termInput").onkeydown=async e=>{
+  if(e.key!=="Enter"||!pyodide)return;
+  const code=e.target.value;e.target.value="";
+  const out=document.getElementById("termOutput");
+  out.textContent+=">>> "+code+"\n";
+  try{const r=await pyodide.runPythonAsync(code);if(r!==undefined)out.textContent+=r+"\n";}
+  catch(err){out.textContent+=err+"\n";}
+  out.scrollTop=out.scrollHeight;
+};
+
+if(window.SpeechRecognition||window.webkitSpeechRecognition){
+  const SR=window.SpeechRecognition||window.webkitSpeechRecognition;
+  recognition=new SR();recognition.lang="id-ID";
+  recognition.onresult=e=>{input.value=e.results[0][0].transcript;send();};
+}
+document.getElementById("voiceBtn").onclick=()=>recognition&&recognition.start();
+
+document.getElementById("file").onchange=async e=>{
+  const f=e.target.files[0];if(!f)return;
+  if(f.type.startsWith("text")||/\.(txt|md|py|js|json)$/.test(f.name))
+    input.value+="\n["+f.name+"]:\n"+(await f.text()).slice(0,2500);
+  else input.value+="\n[File: "+f.name+"]";
+};
+
+function extractSources(t){
+  return [...new Set([...t.matchAll(/https?:\/\/[^\s)]+/g)].map(m=>m[0]))].slice(0,5).map(u=>{
+    try{return{url:u,title:new URL(u).hostname.replace("www.","")}}catch{return null}
+  }).filter(Boolean);
+}
+
+function addMessage(role,content,sources=[]){
+  const d=document.createElement("div");
+  d.className="message "+role;
+  d.innerHTML=role==="assistant"?marked.parse(content):content.replace(/\n/g,"<br>");
+  if(sources.length){
+    const box=document.createElement("div");box.className="sources";
+    sources.forEach(s=>{
+      const a=document.createElement("a");a.className="source";a.href=s.url;a.target="_blank";
+      a.innerHTML=`<img src="https://www.google.com/s2/favicons?domain=${new URL(s.url).hostname}&sz=32"> ${s.title}`;
+      box.appendChild(a);
+    });
+    d.appendChild(box);
+  }
+  if(role==="assistant")d.querySelectorAll("pre code").forEach(el=>hljs.highlightElement(el));
+  chat.appendChild(d);chat.scrollTop=chat.scrollHeight;
+  return d;
+}
+
+function showTyping(){
+  const el=document.createElement("div");
+  el.className="typing-indicator";
+  el.innerHTML=`<div class="dots"><span></span><span></span><span></span></div><span class="typing-text">Menganalisis...</span>`;
+  chat.appendChild(el);chat.scrollTop=chat.scrollHeight;
+  setTimeout(()=>{const t=el.querySelector(".typing-text");if(t)t.textContent="Mengetik...";},700);
+  return el;
+}
+
+function speak(text){
+  if(!speechSynthesis)return;
+  speechSynthesis.cancel();
+  const u=new SpeechSynthesisUtterance(text.slice(0,300));
+  u.lang="id-ID";speechSynthesis.speak(u);
+}
+
+async function streamGroq(messages,key,div){
+  const res=await fetch("https://api.groq.com/openai/v1/chat/completions",{
+    method:"POST",
+    headers:{Authorization:`Bearer ${key}`,"Content-Type":"application/json"},
+    body:JSON.stringify({model:"llama-3.1-70b-versatile",messages,stream:true}),
+    signal:currentAbort?.signal
+  });
+  const reader=res.body.getReader(),decoder=new TextDecoder();
+  let full="";
+  while(true){
+    const{done,value}=await reader.read();if(done)break;
+    for(const line of decoder.decode(value).split("\n")){
+      if(!line.startsWith("data: ")||line.includes("[DONE]"))continue;
+      try{
+        const t=JSON.parse(line.slice(6)).choices?.[0]?.delta?.content||"";
+        if(t){full+=t;div.innerHTML=marked.parse(full);div.querySelectorAll("pre code").forEach(el=>hljs.highlightElement(el));chat.scrollTop=chat.scrollHeight;playType();}
+      }catch{}
+    }
+  }
+  return full;
+}
+
+async function streamGemini(prompt,key,div){
+  const res=await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:streamGenerateContent?alt=sse&key=${key}`,{
+    method:"POST",headers:{"Content-Type":"application/json"},
+    body:JSON.stringify({contents:[{parts:[{text:prompt}]}]}),
+    signal:currentAbort?.signal
+  });
+  const reader=res.body.getReader(),decoder=new TextDecoder();
+  let full="";
+  while(true){
+    const{done,value}=await reader.read();if(done)break;
+    for(const line of decoder.decode(value).split("\n")){
+      if(!line.startsWith("data: "))continue;
+      try{
+        const t=JSON.parse(line.slice(6)).candidates?.[0]?.content?.parts?.[0]?.text||"";
+        if(t){full+=t;div.innerHTML=marked.parse(full);div.querySelectorAll("pre code").forEach(el=>hljs.highlightElement(el));chat.scrollTop=chat.scrollHeight;playType();}
+      }catch{}
+    }
+  }
+  return full;
+}
+
+async function send(){
+  const text=input.value.trim();
+  if(!text)return;
+  const key=apiKeyInput.value.trim();
+  if(!key)return alert("Masukkan API Key");
+
+  addMessage("user",text);
+  input.value="";
+  sendBtn.disabled=true;
+  playType();
+
+  const indicator=showTyping();
+  currentAbort=new AbortController();
+
+  const sys="Kamu asisten AI bernama X. Jawab jelas, helpful, dalam bahasa Indonesia. Jika memberi info faktual sertakan sumber berupa link https:// di akhir jawaban.";
+
+  try{
+    let full="";
+    const tempDiv=document.createElement("div");
+    if(modelSelect.value==="groq"){
+      full=await streamGroq([{role:"system",content:sys},{role:"user",content:text}],key,tempDiv);
+    }else{
+      full=await streamGemini(sys+"\n\n"+text,key,tempDiv);
+    }
+    indicator.remove();
+    const sources=extractSources(full);
+    addMessage("assistant",full,sources);
+    speak(full);
+  }catch(err){
+    indicator.remove();
+    if(err.name!=="AbortError")addMessage("assistant","**Error:** "+err.message);
+  }
+  sendBtn.disabled=false;
+  input.focus();
+}
+
+sendBtn.onclick=send;
+input.onkeydown=e=>{if(e.key==="Enter"&&!e.shiftKey){e.preventDefault();send();}};
+
+addMessage("assistant","Halo, saya **X**. Siap membantu.");
+</script>
+</body>
+</html>
